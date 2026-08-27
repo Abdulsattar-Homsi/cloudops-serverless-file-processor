@@ -1,3 +1,4 @@
+import json
 import logging
 
 import azure.functions as func
@@ -19,7 +20,21 @@ app = func.FunctionApp()
     connection="CloudOpsStorage",
     source=func.BlobSource.EVENT_GRID,
 )
-def process_blob_upload(input_blob: func.InputStream) -> None:
+@app.blob_output(
+    arg_name="processed_output",
+    path="processed/{name}.json",
+    connection="CloudOpsStorage",
+)
+@app.blob_output(
+    arg_name="failed_output",
+    path="failed/{name}.json",
+    connection="CloudOpsStorage",
+)
+def process_blob_upload(
+    input_blob: func.InputStream,
+    processed_output: func.Out[str],
+    failed_output: func.Out[str],
+) -> None:
     blob_name = input_blob.name
     content = input_blob.read()
 
@@ -32,6 +47,14 @@ def process_blob_upload(input_blob: func.InputStream) -> None:
     try:
         report = process_file(blob_name, content)
 
+        processed_output.set(
+            json.dumps(
+                report,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+
         logging.info(
             "CloudOps processing completed: source_blob=%s status=%s sha256=%s",
             blob_name,
@@ -41,6 +64,14 @@ def process_blob_upload(input_blob: func.InputStream) -> None:
 
     except ProcessingValidationError as error:
         failure_report = build_failure_report(blob_name, error)
+
+        failed_output.set(
+            json.dumps(
+                failure_report,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
         logging.warning(
             "CloudOps validation failed: source_blob=%s error_code=%s",
